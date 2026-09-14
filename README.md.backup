@@ -1,0 +1,326 @@
+# ViCURA - De Bruijn Graph Genome Assembler
+
+A high-performance bioinformatics tool for genome assembly using De Bruijn Graph algorithms with support for both sequential and parallel (MPI) execution.
+
+## Features
+
+- **Dual Execution Modes**: Run sequentially on a single machine or in parallel across multiple nodes with MPI
+- **Complete OLC Pipeline**: Build Overlap-Layout-Consensus graphs from raw FASTQ data
+- **Advanced Graph Algorithms**: Bubble detection, cycle handling, topological sorting
+- **Optimized Performance**: SIMD optimizations, minimizer-based k-mer bucketing
+- **Flexible Configuration**: Command-line arguments or configuration files
+- **Unified Codebase**: Single, maintainable implementation supporting both modes
+
+## Quick Start
+
+### Build
+
+```bash
+# Build sequential version (no MPI required)
+make sequential
+
+# Build parallel version (requires MPI)
+make parallel
+
+# Build both
+make all
+```
+
+### Run Sequential Mode
+
+```bash
+./bin/dbg_sequential \
+    --input-r1 data/R1.fastq \
+    --input-r2 data/R2.fastq \
+    --workspace ./workspace \
+    --build-olc \
+    --extract-subgraphs \
+    --detect-cycles
+```
+
+### Run Parallel Mode
+
+```bash
+mpirun -n 4 ./bin/dbg_parallel \
+    --olc-input /path/to/precomputed/olc \
+    --workspace ./workspace \
+    --build-dbg
+```
+
+## Installation
+
+### Prerequisites
+
+**For Sequential Version:**
+- C++11 compatible compiler (gcc 4.8+ or clang 3.3+)
+- Make
+
+**For Parallel Version:**
+- MPI implementation (OpenMPI 1.10+ or MPICH 3.2+)
+- mpicxx compiler wrapper
+- All sequential prerequisites
+
+### Building from Source
+
+```bash
+git clone <repository-url>
+cd ViCURA
+make all
+```
+
+### Verify Installation
+
+```bash
+make test
+./bin/dbg_sequential --help
+```
+
+## Usage
+
+### Configuration File
+
+Create a configuration file (e.g., `my_config.conf`):
+
+```ini
+# Workspace and input files
+workspace=/path/to/workspace
+input_R1=/path/to/reads_R1.fastq
+input_R2=/path/to/reads_R2.fastq
+
+# Algorithm parameters
+minimizer_size=5
+kmer_length=150
+overlap_min=25
+overlap_max=149
+
+# Pipeline stages
+build_olc=true
+extract_subgraphs=true
+detect_cycles=true
+```
+
+Run with configuration:
+
+```bash
+./bin/dbg_sequential --config my_config.conf
+```
+
+### Command-Line Options
+
+```
+General Options:
+  --workspace <path>        Workspace directory for intermediate files
+  --config <path>           Load settings from configuration file
+  -h, --help                Display help message
+
+Input Options:
+  --input-r1 <path>         FASTQ file for read 1 (paired-end)
+  --input-r2 <path>         FASTQ file for read 2 (paired-end)
+  --olc-input <path>        Pre-computed OLC data directory
+
+Algorithm Parameters:
+  --minimizer-size <int>    Minimizer size for k-mer bucketing (default: 5)
+  --kmer-length <int>       Length of k-mers (default: 150)
+
+Execution Mode:
+  --sequential              Force sequential execution
+  --parallel                Force parallel execution (requires MPI)
+
+Pipeline Stages:
+  --build-olc               Build OLC from FASTQ input
+  --extract-subgraphs       Extract largest subgraphs
+  --detect-cycles           Detect and handle cycles
+  --build-dbg               Build De Bruijn graph (parallel mode)
+```
+
+## Workflow
+
+### Sequential Workflow
+
+1. **Input**: Paired-end FASTQ files
+2. **OLC Construction**: Build overlap graph from reads
+3. **Subgraph Extraction**: Identify largest connected components
+4. **Cycle Resolution**: Detect and handle cycles
+5. **Assembly**: Generate final sequences
+
+**Best for**: Complete analysis, smaller datasets (<10M reads), development/testing
+
+### Parallel Workflow
+
+1. **Input**: Pre-computed OLC data
+2. **Distribution**: Spread k-mers across MPI processes (1024 buckets)
+3. **Parallel DBG**: Construct De Bruijn graph in parallel
+4. **Synchronization**: Aggregate results
+5. **Output**: Final assembly
+
+**Best for**: Large-scale datasets (>10M reads), production runs, HPC environments
+
+## Examples
+
+### Example 1: Full Sequential Analysis
+
+```bash
+# Complete pipeline from FASTQ to assembly
+./bin/dbg_sequential \
+    --input-r1 data/sample_R1.fastq \
+    --input-r2 data/sample_R2.fastq \
+    --workspace /tmp/assembly \
+    --kmer-length 150 \
+    --minimizer-size 5 \
+    --build-olc \
+    --extract-subgraphs \
+    --detect-cycles
+```
+
+### Example 2: Parallel Processing
+
+```bash
+# First, build OLC with sequential mode (one-time step)
+./bin/dbg_sequential \
+    --input-r1 data/large_R1.fastq \
+    --input-r2 data/large_R2.fastq \
+    --workspace /scratch/olc_data \
+    --build-olc
+
+# Then run parallel DBG construction
+mpirun -n 16 ./bin/dbg_parallel \
+    --olc-input /scratch/olc_data/OLC_output \
+    --workspace /scratch/dbg_data \
+    --build-dbg
+```
+
+### Example 3: Using Configuration Files
+
+```bash
+# Sequential with config
+./bin/dbg_sequential --config config/default.conf
+
+# Parallel with config
+mpirun -n 8 ./bin/dbg_parallel --config config/parallel.conf
+```
+
+## Output
+
+Results are written to `<workspace>/result/` directory:
+
+- `strain_*` - Assembled strain sequences
+- `coverageinfo_*` - Coverage information
+- `subgraph_*` - Subgraph data
+- Log files with assembly statistics
+
+## Performance
+
+### Typical Performance (reference)
+
+| Dataset Size | Mode | Processes | Time | Memory |
+|--------------|------|-----------|------|--------|
+| 1M reads | Sequential | 1 | ~30 min | ~4 GB |
+| 10M reads | Sequential | 1 | ~5 hours | ~40 GB |
+| 10M reads | Parallel | 8 | ~1 hour | ~10 GB/proc |
+| 100M reads | Parallel | 32 | ~3 hours | ~15 GB/proc |
+
+*Performance varies based on read length, k-mer size, and hardware*
+
+### Optimization Tips
+
+- Use parallel mode for datasets > 10M reads
+- Increase minimizer size (6-7) for very large datasets
+- Ensure sufficient workspace disk space (~3x input size)
+- For HPC: allocate ~10-20GB memory per MPI process
+
+## Troubleshooting
+
+### Build Issues
+
+**Problem**: `mpicxx: command not found`
+```bash
+# Install OpenMPI (Ubuntu/Debian)
+sudo apt-get install libopenmpi-dev openmpi-bin
+
+# Or MPICH
+sudo apt-get install mpich libmpich-dev
+```
+
+**Problem**: Compilation errors with C++11
+```bash
+# Ensure gcc 4.8+ or clang 3.3+
+g++ --version
+```
+
+### Runtime Issues
+
+**Problem**: Out of memory
+- Reduce dataset size or use parallel mode
+- Increase available memory
+- Use higher minimizer size to reduce k-mer count
+
+**Problem**: MPI processes hang
+- Check MPI configuration
+- Verify workspace is accessible from all nodes
+- Ensure consistent file paths across nodes
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│         Configuration Layer              │
+│  (Command-line, Config Files)            │
+└────────────────┬────────────────────────┘
+                 │
+┌────────────────▼────────────────────────┐
+│       Execution Context Layer            │
+│  (Sequential Context / MPI Context)      │
+└────────────────┬────────────────────────┘
+                 │
+┌────────────────▼────────────────────────┐
+│          Pipeline Layer                  │
+│  (Workflow Orchestration)                │
+└────────┬───────────────────────┬────────┘
+         │                       │
+┌────────▼────────┐    ┌────────▼─────────┐
+│  Sequential     │    │   Parallel        │
+│  Pipeline       │    │   Pipeline        │
+│  - Build OLC    │    │   - Load OLC      │
+│  - Subgraphs    │    │   - K-mer Bucket  │
+│  - Cycles       │    │   - Parallel DBG  │
+└────────┬────────┘    └────────┬──────────┘
+         │                      │
+         └──────────┬───────────┘
+                    │
+    ┌───────────────▼──────────────────┐
+    │      Algorithm Layer              │
+    │  (DBG, Bubble, Cycle, etc.)      │
+    └───────────────┬──────────────────┘
+                    │
+    ┌───────────────▼──────────────────┐
+    │         Core Layer                │
+    │  (Reads, Graph, Dynamic Tree)    │
+    └───────────────────────────────────┘
+```
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Maintain compatibility with both sequential and parallel modes
+2. Add tests for new features
+3. Follow existing code style
+4. Update documentation
+
+## License
+
+[Add license information]
+
+## Citation
+
+If you use ViCURA in your research, please cite:
+
+[Add citation information]
+
+## Contact
+
+[Add contact information]
+
+## Acknowledgments
+
+This project implements De Bruijn Graph algorithms for genome assembly with optimizations for both single-node and distributed computing environments.
